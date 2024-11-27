@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import MapView from "react-native-maps";
 import MapViewClustering from "react-native-map-clustering";
-import { Marker, Callout } from "react-native-maps";
-import { Text, StyleSheet, View, Button, ActivityIndicator } from "react-native";
+import { Circle } from "react-native-maps"; // Import du composant Circle
+import { View, ActivityIndicator, StyleSheet } from "react-native";
 
 // Définir un type pour les radars
 interface Radar {
@@ -19,73 +19,77 @@ interface Radar {
 const INITIAL_REGION = {
   latitude: 46.603354,
   longitude: 1.888334,
-  latitudeDelta: 8.5,
-  longitudeDelta: 8.5,
+  latitudeDelta: 20,
+  longitudeDelta: 20, 
 };
 
 const Map: React.FC = () => {
-  const [radars, setRadars] = useState<Radar[]>([]); // Utilisation du type Radar pour le state
-  const [loading, setLoading] = useState<boolean>(true); // État pour indiquer le chargement
+  const [radars, setRadars] = useState<Radar[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [region, setRegion] = useState(INITIAL_REGION); // État pour la région visible
 
-  // Optimisation de la fonction fetchRadars avec useCallback
   const fetchRadars = useCallback(async () => {
     let allRadars: Radar[] = [];
-    const pageSize = 50; // L'API retourne 50 éléments par page
+    const pageSize = 50;
 
     try {
-      // Récupérer les informations sur le total d'éléments
       const response = await fetch(
         `https://tabular-api.data.gouv.fr/api/resources/8a22b5a8-4b65-41be-891a-7c0aead4ba51/data/?page=1&page_size=${pageSize}`
       );
       const firstPageData = await response.json();
 
-      const totalRadars = firstPageData.meta.total; // Total de radars disponibles
-      const totalPages = Math.ceil(totalRadars / pageSize); // Nombre total de pages à récupérer
+      const totalRadars = firstPageData.meta.total;
+      const totalPages = Math.ceil(totalRadars / pageSize);
 
-      // Récupère les radars des pages suivantes
-      const requests = []
-
+      const requests = [];
       for (let i = 2; i <= totalPages; i++) {
         requests.push(
           `https://tabular-api.data.gouv.fr/api/resources/8a22b5a8-4b65-41be-891a-7c0aead4ba51/data/?page=${i}&page_size=${pageSize}`
         );
       }
-      const allPartsResponses = await Promise.all(
-        requests.map(r => fetch(r))
-      )
-      const allPartsSeparated = await Promise.all(allPartsResponses.map(res => res.json()))
-      const allParts = allPartsSeparated.flatMap((p, i) => p.data)
 
-      // Mettez à jour le state avec tous les radars récupérés3
+      const allPartsResponses = await Promise.all(requests.map((r) => fetch(r)));
+      const allPartsSeparated = await Promise.all(allPartsResponses.map((res) => res.json()));
+      const allParts = allPartsSeparated.flatMap((p) => p.data);
 
-      console.log("radars data", JSON.stringify(allParts, null, 2), allParts.length);
-      
       setRadars(allParts);
       setLoading(false);
     } catch (error) {
       console.error("Erreur lors de la récupération des radars:", error);
-      setLoading(false); // Arrête le chargement en cas d'erreur
+      setLoading(false);
     }
-  }, []); // La fonction est mémorisée et ne sera pas recréée à chaque rendu
+  }, []);
 
-  // Récupérer les radars au démarrage du composant
   useEffect(() => {
     fetchRadars();
-  }, []); // Utilise fetchRadars de useCallback dans useEffect
+  }, []);
 
-  // Utilisation de useMemo pour éviter les re-rendus inutiles de la liste des radars
-  const radarMarkers = useMemo(() => {
-    return radars.map((radar) => (
-      <Marker
+  const radarCircles = useMemo(() => {
+    const radarsFilter = radars.filter((radar) => {
+      const withinLatitude =
+        radar.latitude >= region.latitude - region.latitudeDelta / 2 &&
+        radar.latitude <= region.latitude + region.latitudeDelta / 2;
+      const withinLongitude =
+        radar.longitude >= region.longitude - region.longitudeDelta / 2 &&
+        radar.longitude <= region.longitude + region.longitudeDelta / 2;
+      return withinLatitude && withinLongitude;
+    });
+  
+    return radarsFilter.map((radar) => (
+      <Circle
         key={radar.__id}
-        coordinate={{
+        center={{
           latitude: radar.latitude,
           longitude: radar.longitude,
         }}
-      >
-      </Marker>
+        radius={500}
+        strokeWidth={1}
+        strokeColor="rgba(255, 0, 0, 0.5)"
+        fillColor="rgba(255, 0, 0, 0.3)"
+      />
     ));
-  }, [radars]); // La liste des markers ne sera recalculée que si radars change
+  }, [radars, region]);
+  
 
   if (loading) {
     return (
@@ -97,12 +101,11 @@ const Map: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      {/* MapViewClustering avec la référence mapRef */}
       <MapViewClustering 
-        initialRegion={INITIAL_REGION} 
-        style={styles.map}
-      >
-        {radarMarkers}
+      initialRegion={INITIAL_REGION} 
+      style={styles.map}
+      onRegionChangeComplete={r => setRegion(r)}>
+        {radarCircles}
       </MapViewClustering>
     </View>
   );
